@@ -1,8 +1,67 @@
+// IDE aspects
 apply plugin: 'java'
 apply plugin: 'idea'
 
+// used in file filtering
+import org.apache.tools.ant.filters.ReplaceTokens
+import org.apache.tools.ant.filters.ExpandProperties
 
+// artifact version
 version = '1.0.0-SNAPSHOT'
+
+def environments = [ 'dev', 'acc', 'prod']
+
+// create a jar for each environment containing classes and filtered resources
+environments.each { e ->
+    task "create${e}jar"(type: Jar, dependsOn: classes) << {
+
+        println "jar for $e"
+
+        destDir = filterPropertiesForEnv(e)
+
+        classifier = e
+    }
+
+    artifacts.add('archives', tasks["create${e}jar"])
+}
+
+
+File filterPropertiesForEnv(envName) {
+    def destDir = new File(project.buildDir, envName)
+    destDir.mkdir()
+
+    println "filter for $envName into $destDir"
+
+    // Load environment specific settings
+    def config = new ConfigSlurper(envName).parse(new File('settings.groovy').toURL())
+
+    println "Filtering to $config.server.host:$config.server.port"
+
+    copy {
+        from "$buildDir/classes/main"
+        include '**/*.class'
+        into destDir
+    }
+
+    copy {
+        from "src/main/resources"
+        include '**/*.properties'
+            // Ant style @key@ to value filtering:
+            filter(ReplaceTokens, tokens: config.toProperties())
+
+            // Maven style ${key} to value filtering:
+            //  first we have to convert the config into Ant properties
+            config.toProperties().each() { k, v ->
+                ant.properties[k] = v
+            }
+            //  after that we can expand ant properties
+            filter(ExpandProperties, project : ant.project)
+        into destDir
+    }
+
+    destDir
+}
+
 
 dependencies {
     testCompile 'junit:junit.4.11'
